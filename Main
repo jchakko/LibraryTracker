@@ -1,0 +1,505 @@
+/*
+ *  Library Loan Tracker
+ *
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <sqlca.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+
+#define UNAME_LEN      20 
+#define PWD_LEN        40
+#define STRING_LENGTH   9
+
+typedef char asciiz[PWD_LEN]; 
+typedef char String[STRING_LENGTH];
+
+EXEC SQL TYPE asciiz IS CHARZ(PWD_LEN) REFERENCE; 
+asciiz     username; 
+asciiz     password;
+String Search;
+
+struct Patron
+{
+    int cardNo;
+    asciiz patronName;
+    asciiz address;
+    asciiz phone;
+};
+
+struct Media 
+{
+    asciiz title;
+    asciiz author;
+    int copyNo;
+    asciiz format;
+};
+
+struct Media_ind 
+{
+    short title_ind;
+    short author_ind;
+    short copyNo_ind;
+    short format_ind;
+};
+
+/* Input host variable. */
+
+asciiz item_title;
+int total_copy;
+
+struct ItemType
+{
+    asciiz format;
+    int checkDays;
+    int renewals;
+};
+
+struct Payment
+{
+    asciiz patronName;
+    asciiz title;
+    asciiz reason;
+    char datePaid[9];
+    float amount;
+};
+
+struct Reservation
+{
+    asciiz patronName;
+    asciiz title;
+    char dateMade[9];
+};
+
+struct Loan
+{
+    int cardNo;
+    asciiz title;
+    int copyNo;
+    float amountDue;
+    int daysOver;
+    int renewals;
+};
+
+void sql_error(msg)
+    char *msg;
+{ 
+    char err_msg[512];
+    size_t buf_len, msg_len;
+    
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    printf("\n%s\n", msg);
+
+/* Call sqlglm() to get the complete text of the
+ * error message.
+ */
+    buf_len = sizeof (err_msg);
+    sqlglm(err_msg, &buf_len, &msg_len);
+    printf("%.*s\n", msg_len, err_msg);
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void main() 
+{ 
+   struct  Patron *Patron_ptr;
+   struct  Media *Media_ptr;
+   struct  Media_ind *Media_ind_ptr;
+   struct  ItemType *ItemType_ptr;
+   struct  Payment *Payment_ptr;
+   struct  Reservation *Reservation_ptr;
+   struct  Loan *Loan_ptr;
+    
+/* Allocate memory for emp_info struct. */ 
+
+    if ((Patron_ptr =
+        (struct Patron *) malloc(sizeof(struct Patron))) == 0)
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if ((Media_ptr =
+        (struct Media *) malloc(sizeof(struct Media))) == 0)
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((Media_ind_ptr =
+        (struct Media_ind *) malloc(sizeof(struct Media_ind))) == 0)
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+   
+
+    if ((ItemType_ptr =  
+        (struct ItemType *) malloc(sizeof(struct ItemType))) == 0)      
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((Payment_ptr = 
+        (struct Payment *) malloc(sizeof(struct Payment))) == 0)
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((Reservation_ptr =
+        (struct Reservation *) malloc(sizeof(struct Reservation))) == 0)
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if ((Loan_ptr =
+        (struct Loan *) malloc(sizeof(struct Loan))) == 0)
+    {
+        fprintf(stderr, "Memory allocation error.\n");
+        exit(EXIT_FAILURE);
+    }
+
+
+
+/* Connect to ORACLE. */ 
+    strcpy(username, "en567g4@oradb"); 
+    strcpy(password, "Chill472"); 
+ 
+    EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--");
+ 
+    EXEC SQL CONNECT :username IDENTIFIED BY :password; 
+    printf("\nConnected to ORACLE as user: %s\n", username); 
+    
+/* Declare the cursor. All static SQL explicit cursors
+ * contain SELECT commands. 'salespeople' is a SQL identifier,
+ * not a (C) host variable.
+ */
+
+    EXEC SQL DECLARE copylist CURSOR FOR
+        SELECT COPYNO FROM MEDIA
+            WHERE TITLE = 'Star Tale';
+
+    EXEC SQL DECLARE duedetails CURSOR FOR
+        SELECT * FROM PATRON
+            WHERE CARDNO = ANY(
+                 SELECT CARDNO
+                 FROM LOAN
+                 WHERE DAYSOVER > 0);
+
+    EXEC SQL DECLARE patronfine CURSOR FOR
+        SELECT CARDNO, SUM(AMOUNTDUE) 
+        FROM LOAN
+        WHERE AMOUNTDUE > 0
+            GROUP BY CARDNO;
+
+    EXEC SQL DECLARE grossoverdue CURSOR FOR
+        SELECT TITLE, COPYNO, DAYSOVER FROM LOAN
+            WHERE DAYSOVER > 8;
+ 
+    EXEC SQL DECLARE formatinfo CURSOR FOR
+        SELECT *
+            FROM ITEMTYPE;
+
+    EXEC SQL DECLARE paymenthistory CURSOR FOR
+        SELECT SUM(AMOUNT)
+            FROM PAYMENT;    
+
+    EXEC SQL DECLARE patronpayment CURSOR FOR
+        SELECT * 
+            FROM PAYMENT
+                ORDER BY PATRONNAME ASC;
+
+    EXEC SQL DECLARE reservationinfo CURSOR FOR
+        SELECT *
+            FROM RESERVATION;
+             
+/* Open the cursor. */ 
+    
+
+    int choice = 11;
+
+while (choice !=0) {
+    
+    printf("Please select an option, 0 to exit\n");
+    printf("    1 : List copies of Media\n");
+    printf("    2 : Find patrons with overdue items\n");
+    printf("    3 : Display total fine owed\n");
+    printf("    4 : List Payment details by Patron\n");
+    printf("    5 : List items that are grossly overdue\n");
+    printf("    6 : Display Reservation info\n");
+    printf("    7 : Display Payment History\n");
+    printf("    8 : List Formats\n");
+    printf("    9 : Lets have a go at it\n");
+    printf("    0 : EXIT\n");
+    scanf("%i", &choice);
+
+    switch (choice)
+        {
+
+        case 1:
+
+/* Query 1: List copies of Media  */
+    
+    printf("What is the title");
+    fgets(Search, 15, stdin);
+
+    EXEC SQL OPEN copylist;
+
+    printf("\n\nCopies\n");
+    printf("----------------------\n");
+   
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    for (;;)
+    {
+        EXEC SQL FETCH copylist INTO :Media_ptr->copyNo;
+        printf("    %i\n", Media_ptr->copyNo);
+    }
+    printf("\n");
+
+    EXEC SQL CLOSE copylist;
+
+            break;
+
+          case 2:
+
+/* Query 2: Find Patrons with Overdue items  */
+    EXEC SQL OPEN duedetails;
+
+    printf("\n\nOverdue Patrons\n");
+    printf("CardNo       Name           Address         Phone \n");
+    printf("------      ------          -------         ------  \n");
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    for (;;)
+
+    {
+        EXEC SQL FETCH duedetails INTO :Patron_ptr;
+        printf("%i    %.13s    %.15s       %s\n", Patron_ptr->cardNo,
+        Patron_ptr->patronName, Patron_ptr->address,
+        Patron_ptr->phone);
+    }
+
+    printf("\n");
+
+    EXEC SQL CLOSE duedetails;
+
+            break;
+
+
+
+          case 9:
+
+/*Query in development*/
+
+    fflush(stdin);
+
+    for(;;)
+    {
+        
+        printf("\nWhat is the title: ");
+        fgets(item_title, 20, stdin);
+        printf("%s", item_title);
+
+        EXEC SQL WHENEVER NOT FOUND GOTO notfound; 
+
+        EXEC SQL SELECT title 
+            INTO :Media_ptr->title INDICATOR :Media_ind_ptr->title_ind
+            FROM MEDIA
+            WHERE TITLE = :item_title; 
+
+/*Print Results */
+        printf("\nTitle    Author\n");
+        printf("-------    --------\n");
+
+/*Null-Terminate the output data */
+/*        Media_ptr->title.arr[Media_ptr->title.len] = '\0'; */
+        printf("%s %s\n", Media_ptr->title);
+
+     
+
+notfound:
+        printf("\nYa dun goofed\n");
+        break;
+
+    }        
+
+    break;
+
+          case 3:
+
+/* Query 3: Display Patron Fines  */
+    EXEC SQL OPEN patronfine;
+
+    printf("\n\nOVERDUE ITEMS\n");
+    printf("cardNo          Total \n");
+    printf("-----           ------\n");
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+    for (;;)
+
+    {
+        EXEC SQL FETCH patronfine INTO :Loan_ptr->cardNo,
+:Loan_ptr->amountDue;
+        printf("%i            %.2f      \n", Loan_ptr->cardNo,
+        Loan_ptr->amountDue);
+    }
+
+    printf("\n");
+
+    EXEC SQL CLOSE patronfine;
+
+            break;
+
+          case 4:
+
+/* Query 4: Display Payments By Patron  */
+    EXEC SQL OPEN patronpayment;
+
+    printf("\n\nPAYMENT HISTORY\n");
+    printf("Name            Title          Reason   Amount   Date\n");
+    printf("-----           ------         -------  ------   -----\n");
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    for (;;)
+    {
+        EXEC SQL FETCH patronpayment INTO :Payment_ptr;
+        printf("%.15s %.15s %.8s %.2f    %.10s \n", Payment_ptr->patronName, 
+        Payment_ptr->title, Payment_ptr->reason,
+        Payment_ptr->amount, Payment_ptr->datePaid);
+    }
+
+    printf("\n");
+
+    EXEC SQL CLOSE patronpayment;
+
+            break;
+
+          case 5:
+
+/* Query 5: Display overdue items  */
+    EXEC SQL OPEN grossoverdue;
+
+    printf("\n\nOVERDUE ITEMS\n");
+    printf("Title           CopyNo     Days Overdue\n");
+    printf("-----           ------     ------------\n");
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+    for (;;)
+    {
+        EXEC SQL FETCH grossoverdue INTO :Loan_ptr->title, 
+:Loan_ptr->copyNo, :Loan_ptr->daysOver;
+        printf("%.15s %i     %i \n", Loan_ptr->title,
+        Loan_ptr->copyNo, Loan_ptr->daysOver);
+    }
+
+    printf("\n");
+
+    EXEC SQL CLOSE grossoverdue;
+
+            break;
+
+
+            case 6:
+
+/* Query 6: Display Reservation Details  */
+    EXEC SQL OPEN reservationinfo;
+
+    printf("\n\nReservations\n");
+    printf("Name            Title             Date\n");
+    printf("-----           ------           -----\n");
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;)
+    {
+        EXEC SQL FETCH reservationinfo INTO :Reservation_ptr;
+        printf("%.15s %.15s  %.10s \n", Reservation_ptr->patronName,
+        Reservation_ptr->title, Reservation_ptr->dateMade);
+    }
+
+    printf("\n");
+
+    EXEC SQL CLOSE reservationinfo;
+
+            break;
+
+
+
+                    case 7:
+
+/* Query 7: Display Monthly Revnue  */
+    EXEC SQL OPEN paymenthistory;
+
+    printf("\n\nPAYMENT HISTORY\n");
+    printf("Total Revenue For Month\n");
+    printf("----------------------\n");
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    for (;;)
+    {
+        EXEC SQL FETCH paymenthistory INTO :Payment_ptr->amount;
+        printf("    %.2f\n", Payment_ptr->amount);
+     
+    }
+    printf("\n");
+
+    EXEC SQL CLOSE paymenthistory;
+
+            break;
+
+
+            case 8:
+    
+/* Query 8: List Format Type Information  */
+  
+    EXEC SQL OPEN formatinfo;   
+
+    printf("\n\nThe format types are\n");
+    printf("Format       CheckDays     Renewals\n");
+    printf("---------    ---------     --------\n");
+    
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    for (;;)
+    {
+        EXEC SQL FETCH formatinfo INTO :ItemType_ptr;
+        printf("%.10s         %i             %i\n",
+        ItemType_ptr->format,
+            ItemType_ptr->checkDays, ItemType_ptr->renewals);
+    }
+    printf("\n");
+
+    EXEC SQL CLOSE formatinfo;  
+
+  
+        break;
+
+        case 0:
+ 
+    printf("I'm gone");
+
+    break;
+
+    }
+
+}
+
+/* Close the cursor. */
+    
+    printf("\nFarewell.\n\n");
+    
+    EXEC SQL COMMIT WORK RELEASE; 
+    exit(EXIT_SUCCESS); 
+} 
